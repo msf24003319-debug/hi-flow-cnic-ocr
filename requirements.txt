@@ -1,0 +1,14 @@
+# CNIC OCR microservice — Python 3.10/3.11
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+pydantic==2.10.4
+python-multipart==0.0.20
+
+# PaddleOCR (CPU). Paddle wheels are platform-specific — if `pip install`
+# fails for your OS/arch, install the matching wheel from
+# https://www.paddlepaddle.org.cn/en first, then re-run this file.
+paddleocr==2.9.1
+paddlepaddle==2.6.2
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
