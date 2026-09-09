@@ -1,14 +1,26 @@
 # CNIC OCR microservice
-FROM python:3.11-slim
+#
+# Base image: the FULL python:3.11 (Debian bookworm), NOT python:3.11-slim.
+# The pinned stack (paddlepaddle 2.6.2 / paddleocr 2.9.1) runs cleanly on a
+# normal x86-64 host but the PaddlePaddle native runtime SIGSEGVs on the slim
+# image — slim omits shared libraries / a consistent libstdc++/libgomp that
+# Paddle's manylinux wheel links against at runtime. The full image ships them.
+FROM python:3.11
 
-# PaddleOCR / OpenCV runtime deps
+# OpenCV runtime deps (present on full image, kept explicit for clarity).
 RUN apt-get update && apt-get install -y --no-install-recommends \
       libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Keep native math/threading pools modest — the container is CPU-limited, and
+# oneDNN (MKL-DNN) has known native crashes in paddlepaddle 2.6.x, so disable it.
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HOME=/app
+    HOME=/app \
+    OMP_NUM_THREADS=2 \
+    OPENBLAS_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
+    FLAGS_use_mkldnn=0
 
 WORKDIR /app
 

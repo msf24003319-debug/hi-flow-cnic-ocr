@@ -14,6 +14,9 @@ import threading
 # Quieten PaddlePaddle's native (GLOG) chatter before paddle is imported.
 os.environ.setdefault("GLOG_minloglevel", "2")
 os.environ.setdefault("FLAGS_call_stack_level", "0")
+# oneDNN / MKL-DNN has known native SIGSEGVs in paddlepaddle 2.6.x — keep it off
+# (also set as an ENV in the Dockerfile so it covers the build-time warm step).
+os.environ.setdefault("FLAGS_use_mkldnn", "0")
 
 import numpy as np
 
@@ -38,6 +41,7 @@ def _get_ocr():
                     use_angle_cls=True,  # handles 90/180/270-rotated cards
                     lang=config.OCR_LANG,
                     show_log=False,
+                    enable_mkldnn=False,  # explicit: no oneDNN (SIGSEGV-prone on 2.6.x)
                 )
                 log.info("PaddleOCR ready.")
     return _ocr
