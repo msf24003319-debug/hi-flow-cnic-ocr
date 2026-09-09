@@ -1,45 +1,48 @@
-"""PaddleOCR wrapper.
+"""OCR wrapper — RapidOCR on ONNX Runtime (CPU).
 
-The model is loaded once, lazily, on the first request (keeps container
-start-up fast and avoids downloading weights during image build if the
-network there is restricted).
+Replaces the previous PaddleOCR / PaddlePaddle engine, whose native runtime
+SIGSEGV'd during inference on the deployment container (works on a normal
+host, crash-loops on Railway; unresolved upstream across paddle 2.6.x–3.x).
+
+RapidOCR runs the same PP-OCRv4 detection / classification / recognition
+models through ONNX Runtime, which is CPU-stable in a slim container and has
+no AVX / libstdc++ / oneDNN fragility. The models ship inside the wheel, so
+there is no first-request download.
+
+The public contract is unchanged:
+
+    run_ocr(image_bytes: bytes) -> OcrResult(candidates, confidence, line_count)
+
+so app/main.py, the CNIC extraction / matching logic, and the /verify-cnic
+response are all untouched.
 """
 from __future__ import annotations
 
-import io
 import logging
-import os
 import threading
-
-# Quieten PaddlePaddle's native (GLOG) chatter before paddle is imported.
-os.environ.setdefault("GLOG_minloglevel", "2")
-os.environ.setdefault("FLAGS_call_stack_level", "0")
 
 import numpy as np
 
-from . import config
-from .cnic import extract_cnic_candidates
+from .cnic import extract_cnic_candidates, normalize_cnic
 
 log = logging.getLogger("cnic-ocr.ocr")
 
-_ocr_lock = threading.Lock()
+_ocr_lock = threading.Lock()      # single-flights engine construction
+_infer_lock = threading.Lock()    # serialises inference calls
 _ocr = None
 
 
 def _get_ocr():
+    """Lazily build the RapidOCR engine once and reuse it."""
     global _ocr
     if _ocr is None:
         with _ocr_lock:
             if _ocr is None:
-                from paddleocr import PaddleOCR  # heavy import — defer
+                from rapidocr_onnxruntime import RapidOCR  # heavy import — defer
 
-                log.info("Loading PaddleOCR model (lang=%s)…", config.OCR_LANG)
-                _ocr = PaddleOCR(
-                    use_angle_cls=True,  # handles 90/180/270-rotated cards
-                    lang=config.OCR_LANG,
-                    show_log=False,
-                )
-                log.info("PaddleOCR ready.")
+                log.info("Loading RapidOCR (ONNX Runtime, CPU)…")
+                _ocr = RapidOCR()
+                log.info("RapidOCR ready.")
     return _ocr
 
 
@@ -69,20 +72,24 @@ def run_ocr(image_bytes: bytes) -> OcrResult:
     outcome, returned as an empty candidate list.
     """
     img = _decode_image(image_bytes)
-    ocr = _get_ocr()
+    engine = _get_ocr()
 
-    raw = ocr.ocr(img, cls=True)
-    # PaddleOCR returns [ [ [box, (text, conf)], ... ] ] — one entry per image.
+    # RapidOCR __call__ -> (result, elapse); result is
+    #   [[box, text, score], ...]  or  None when nothing is detected.
+    with _infer_lock:
+        out = engine(img)
+    raw = out[0] if isinstance(out, tuple) else out
+
     lines: list[tuple[str, float]] = []
-    for page in raw or []:
-        for entry in page or []:
-            try:
-                text, conf = entry[1][0], float(entry[1][1])
-            except (IndexError, TypeError, ValueError):
-                continue
-            lines.append((text, conf))
+    for entry in raw or []:
+        try:
+            text, conf = str(entry[1]), float(entry[2])
+        except (IndexError, TypeError, ValueError):
+            continue
+        lines.append((text, conf))
 
     if not lines:
+        log.info("ocr: 0 text regions detected")
         return OcrResult([], None, 0)
 
     joined = " ".join(text for text, _ in lines)
@@ -93,13 +100,15 @@ def run_ocr(image_bytes: bytes) -> OcrResult:
     # ONLY — never an authenticity score.
     conf: float | None = None
     if candidates:
-        from .cnic import normalize_cnic
-
         for text, c in lines:
-            if normalize_cnic(text) and normalize_cnic(text) in candidates:
+            n = normalize_cnic(text)
+            if n and n in candidates:
                 conf = c
                 break
     if conf is None:
         conf = sum(c for _, c in lines) / len(lines)
 
+    log.info(
+        "ocr: %d text regions, %d CNIC candidate(s)", len(lines), len(candidates)
+    )
     return OcrResult(candidates, round(conf, 3), len(lines))

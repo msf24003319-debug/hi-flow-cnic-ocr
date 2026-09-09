@@ -1,14 +1,15 @@
-# CNIC OCR microservice — Python 3.10/3.11
+# CNIC OCR microservice — Python 3.11
+
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 pydantic==2.10.4
 python-multipart==0.0.20
 
-# PaddleOCR (CPU). Paddle wheels are platform-specific — if `pip install`
-# fails for your OS/arch, install the matching wheel from
-# https://www.paddlepaddle.org.cn/en first, then re-run this file.
-paddleocr==2.9.1
-paddlepaddle==2.6.2
-opencv-python-headless==4.10.0.84
+# OCR — RapidOCR on ONNX Runtime (CPU-only). Replaces PaddleOCR / PaddlePaddle,
+# whose native runtime SIGSEGV'd on the container. Same PP-OCRv4 models, shipped
+# inside the rapidocr-onnxruntime wheel (no runtime model download).
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.19.2
+opencv-python==4.10.0.84
 numpy==1.26.4
