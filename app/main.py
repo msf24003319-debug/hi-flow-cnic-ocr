@@ -46,7 +46,7 @@ from .supabase_io import download_cnic_object, get_user_id_from_token, update_pr
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("cnic-ocr")
 
-app = FastAPI(title="Hi-Flow CNIC OCR", version="2.1.0")
+app = FastAPI(title="Hi-Flow CNIC OCR", version="2.0.0")
 
 if config.ALLOWED_ORIGINS:
     app.add_middleware(
@@ -128,7 +128,7 @@ class GateResponse(BaseModel):
 
 @app.get("/health")
 async def health() -> dict:
-    return {"ok": True, "service": "cnic-ocr", "version": "2.1.0"}
+    return {"ok": True, "service": "cnic-ocr", "version": "2.0.0"}
 
 
 @app.post("/verify-cnic", response_model=GateResponse)
