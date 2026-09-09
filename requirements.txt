@@ -1,23 +1,14 @@
-# CNIC OCR microservice — Python 3.11
-
+# CNIC OCR microservice — Python 3.10/3.11
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 pydantic==2.10.4
 python-multipart==0.0.20
 
-# PaddleOCR (CPU). paddlepaddle 2.6.2 is the only 2.x cp311 wheel still on PyPI
-# (2.5.x was removed; 3.x has the same container-SIGSEGV class plus API breaks
-# with paddleocr 2.9.1 — see the runtime-crash investigation notes).
+# PaddleOCR (CPU). Paddle wheels are platform-specific — if `pip install`
+# fails for your OS/arch, install the matching wheel from
+# https://www.paddlepaddle.org.cn/en first, then re-run this file.
 paddleocr==2.9.1
 paddlepaddle==2.6.2
-
-# paddleocr 2.9.1 hard-requires BOTH opencv-python and opencv-contrib-python.
-# Left unpinned they resolve to a newer release than any headless opencv also
-# present, so the image ends up with two/three different builds fighting over
-# the `cv2` namespace — a documented native-crash source. Pin every cv2
-# provider to ONE identical version instead.
-opencv-python==4.10.0.84
-opencv-contrib-python==4.10.0.84
-
+opencv-python-headless==4.10.0.84
 numpy==1.26.4
