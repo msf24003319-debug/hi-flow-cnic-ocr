@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -56,6 +57,21 @@ if config.ALLOWED_ORIGINS:
     )
 
 _gate_limiter = RateLimiter(config.GATE_RATE_LIMIT, config.GATE_RATE_PERIOD)
+
+# Every OCR call runs on ONE dedicated worker thread. PaddlePaddle's inference
+# predictor is not thread-safe — concurrent native calls segfault the process —
+# and it is happiest called from a single stable thread. asyncio.to_thread()
+# would otherwise fan calls out across the default executor. The 25s wait_for
+# timeout around each submission is unchanged.
+_ocr_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ocr")
+
+
+async def _run_ocr_guarded(image_bytes: bytes):
+    loop = asyncio.get_running_loop()
+    return await asyncio.wait_for(
+        loop.run_in_executor(_ocr_executor, run_ocr, image_bytes),
+        timeout=config.OCR_TIMEOUT_SECONDS,
+    )
 
 
 def _client_key(request: Request) -> str:
@@ -154,9 +170,7 @@ async def verify_cnic_gate(payload: GateRequest, request: Request) -> GateRespon
     )
 
     try:
-        result = await asyncio.wait_for(
-            asyncio.to_thread(run_ocr, raw), timeout=config.OCR_TIMEOUT_SECONDS
-        )
+        result = await _run_ocr_guarded(raw)
     except asyncio.TimeoutError:
         # A processing timeout is a server-side condition, not a bad request body.
         raise HTTPException(504, "Could not read the CNIC image in time")
@@ -215,9 +229,7 @@ async def verify_cnic_commit(
 
     try:
         image_bytes = await download_cnic_object(norm_path)
-        result = await asyncio.wait_for(
-            asyncio.to_thread(run_ocr, image_bytes), timeout=config.OCR_TIMEOUT_SECONDS
-        )
+        result = await _run_ocr_guarded(image_bytes)
     except Exception as e:  # noqa: BLE001
         # Infrastructure failure (storage download / timeout / crash) — NOT an
         # OCR "no CNIC" result. The gate already passed; leave cnic_ocr_status
