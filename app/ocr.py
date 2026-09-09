@@ -19,6 +19,7 @@ response are all untouched.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 import numpy as np
@@ -26,6 +27,12 @@ import numpy as np
 from .cnic import extract_cnic_candidates, normalize_cnic
 
 log = logging.getLogger("cnic-ocr.ocr")
+
+# ONNX Runtime otherwise sizes its intra-op pool to the host core count and
+# pins every CPU during inference, starving the uvicorn event loop on a small
+# (2 vCPU) container — new connections and Railway's own probes then stall and
+# the edge returns a 502. Cap it so OCR always leaves a core for the app.
+_INTRA_OP_THREADS = max(1, int(os.getenv("OCR_INTRA_OP_THREADS", "1")))
 
 _ocr_lock = threading.Lock()      # single-flights engine construction
 _infer_lock = threading.Lock()    # serialises inference calls
@@ -40,8 +47,14 @@ def _get_ocr():
             if _ocr is None:
                 from rapidocr_onnxruntime import RapidOCR  # heavy import — defer
 
-                log.info("Loading RapidOCR (ONNX Runtime, CPU)…")
-                _ocr = RapidOCR()
+                log.info(
+                    "Loading RapidOCR (ONNX Runtime, CPU, intra_op=%d)…",
+                    _INTRA_OP_THREADS,
+                )
+                _ocr = RapidOCR(
+                    intra_op_num_threads=_INTRA_OP_THREADS,
+                    inter_op_num_threads=1,
+                )
                 log.info("RapidOCR ready.")
     return _ocr
 
